@@ -1,0 +1,30 @@
+{
+    "providers": [
+        {
+            "name": "github",
+        }
+    ],
+    "projects": [
+        {
+            "provider_type": "github",
+            "git_owner": "kubernetes",
+            "git_project": "ingress-nginx",
+            "git_release_filter_must": "chart",
+            "git_allow_prerelease": false
+        },
+        {
+            "provider_type": "github",
+            "git_owner": "rancher",
+            "git_project": "rancher",
+            "git_allow_prerelease": false
+        },
+        {
+            "provider_type": "github",
+            "git_owner": "rancher",
+            "git_project": "rke",
+            "git_release_filter_must": "v1.3",
+            "git_allow_prerelease": false
+        }
+    ]
+
+}
