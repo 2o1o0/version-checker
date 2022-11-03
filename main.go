@@ -93,20 +93,6 @@ func main() {
 	configPathPtr := flag.String("configpath", "./config.json", "Path to config file")
 	limitProjectsPtr := flag.String("limitprojects", "", "Comma array of projects to filter at query")
 
-	// This declares `numb` and `fork` flags, using a
-	// similar approach to the `word` flag.
-	// numbPtr := flag.Int("numb", 42, "an int")
-	// boolPtr := flag.Bool("fork", false, "a bool")
-
-	// It's also possible to declare an option that uses an
-	// existing var declared elsewhere in the program.
-	// Note that we need to pass in a pointer to the flag
-	// declaration function.
-	// var svar string
-	// flag.StringVar(&svar, "svar", "bar", "a string var")
-
-	// Once all flags are declared, call `flag.Parse()`
-	// to execute the command-line parsing.
 	flag.Parse()
 
 	config := load_config(*configPathPtr)
