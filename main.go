@@ -91,7 +91,7 @@ type Author struct {
 func main() {
 	githubTokenPtr := flag.String("githubToken", "", "Github API token")
 	configPathPtr := flag.String("configpath", "./config.json", "Path to config file")
-	// limitProjectsPtr := flag.String("limitprojects", "", "Comma array of projects to filter at query")
+	limitProjectsPtr := flag.String("limitprojects", "", "Comma array of projects to filter at query")
 
 	// This declares `numb` and `fork` flags, using a
 	// similar approach to the `word` flag.
@@ -110,13 +110,9 @@ func main() {
 	flag.Parse()
 
 	config := load_config(*configPathPtr)
-	// limitProjects := strings.Split(*limitProjectsPtr, ",")
 
-	outputReleases := get_releases(config.Projects, config.Providers, *githubTokenPtr)
+	get_releases(config.Projects, strings.Split(*limitProjectsPtr, ","), config.Providers, *githubTokenPtr)
 
-	for _, outputRelease := range outputReleases {
-		fmt.Println(outputRelease.TagName)
-	}
 }
 
 func error_manager(error error, code uint16) {
@@ -140,11 +136,14 @@ func load_config(path string) Config {
 	if err != nil {
 		error_manager(err, 1)
 	}
-	fmt.Println("Successfully Opened", path)
 	// defer the closing of our jsonFile so that we can parse it later on
 	defer jsonFile.Close()
 
-	byteValue, _ := ioutil.ReadAll(jsonFile)
+	byteValue, err := ioutil.ReadAll(jsonFile)
+	if err != nil {
+		error_manager(err, 1)
+	}
+	fmt.Println("Successfully Opened", path)
 
 	var config Config
 	json.Unmarshal([]byte(byteValue), &config)
@@ -154,7 +153,7 @@ func load_config(path string) Config {
 }
 
 func get_releases_github(project Project, githubUrl string, githubToken string) Releases {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases", project.GitOwner, project.GitProject)
+	url := fmt.Sprintf(githubUrl, project.GitOwner, project.GitProject)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -184,39 +183,38 @@ func get_releases_github(project Project, githubUrl string, githubToken string) 
 	return releases
 }
 
-func get_releases(projects []Project, providers []Provider, githubTokenPtr string) Releases {
-
-	var desiredReleases Releases
+func get_releases(projects []Project, limitedprojects []string, providers []Provider, githubTokenPtr string) {
 
 	for _, project := range projects {
 
-		switch project.ProviderType {
-		case "github":
-			fmt.Println("repo:", project.GitOwner, "/", project.GitProject)
-			fmt.Println(providers)
+		for _, limited := range limitedprojects {
+			if limited == project.GitProject || limited == "" {
+				switch project.ProviderType {
+				case "github":
+					fmt.Println("repo:", project.GitOwner, "/", project.GitProject)
+					fmt.Println(providers)
 
-			releases := get_releases_github(project, "https://api.github.com/repos/%s/%s/releases", githubTokenPtr)
+					releases := get_releases_github(project, "https://api.github.com/repos/%s/%s/releases", githubTokenPtr)
 
-			for _, release := range releases {
-				switch release.Prerelease {
-				case false:
-					if strings.Contains(release.TagName, project.GitReleaseFilterMust) {
-						desiredReleases = append(desiredReleases, release)
+					for _, release := range releases {
+						switch release.Prerelease {
+						case false:
+							if strings.Contains(release.TagName, project.GitReleaseFilterMust) {
+								fmt.Println(release.TagName)
+							}
+
+						case true && project.GitAllowPrerelease:
+							if strings.Contains(release.TagName, project.GitReleaseFilterMust) {
+								fmt.Println(release.TagName)
+							}
+						}
 					}
 
-				case true && project.GitAllowPrerelease:
-					if strings.Contains(release.TagName, project.GitReleaseFilterMust) {
-						desiredReleases = append(desiredReleases, release)
-					}
+					// case "docker.io":
+
 				}
 			}
-
-			// case "docker.io":
-
 		}
-
 	}
-
-	return desiredReleases
 
 }
