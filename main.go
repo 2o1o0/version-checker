@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -88,10 +89,46 @@ type Author struct {
 }
 
 func main() {
+	githubTokenPtr := flag.String("githubToken", "", "Github API token")
+	configPathPtr := flag.String("configpath", "./config.json", "Path to config file")
+	// limitProjectsPtr := flag.String("limitprojects", "", "Comma array of projects to filter at query")
 
-	config := load_config("config.json")
+	// This declares `numb` and `fork` flags, using a
+	// similar approach to the `word` flag.
+	// numbPtr := flag.Int("numb", 42, "an int")
+	// boolPtr := flag.Bool("fork", false, "a bool")
 
-	get_releases(config.Projects, config.Providers)
+	// It's also possible to declare an option that uses an
+	// existing var declared elsewhere in the program.
+	// Note that we need to pass in a pointer to the flag
+	// declaration function.
+	// var svar string
+	// flag.StringVar(&svar, "svar", "bar", "a string var")
+
+	// Once all flags are declared, call `flag.Parse()`
+	// to execute the command-line parsing.
+	flag.Parse()
+
+	config := load_config(*configPathPtr)
+	// limitProjects := strings.Split(*limitProjectsPtr, ",")
+
+	outputReleases := get_releases(config.Projects, config.Providers, *githubTokenPtr)
+
+	for _, outputRelease := range outputReleases {
+		fmt.Println(outputRelease.TagName)
+	}
+}
+
+func error_manager(error error, code uint16) {
+	fmt.Println(error)
+
+	switch code {
+	case 1:
+		os.Exit(1)
+	case 2:
+		fmt.Println("Error while loading projects")
+		os.Exit(1)
+	}
 
 }
 
@@ -101,7 +138,7 @@ func load_config(path string) Config {
 	jsonFile, err := os.Open(path)
 	// if we os.Open returns an error then handle it
 	if err != nil {
-		fmt.Println(err)
+		error_manager(err, 1)
 	}
 	fmt.Println("Successfully Opened", path)
 	// defer the closing of our jsonFile so that we can parse it later on
@@ -116,7 +153,40 @@ func load_config(path string) Config {
 	return config
 }
 
-func get_releases(projects []Project, providers []Provider) {
+func get_releases_github(project Project, githubUrl string, githubToken string) Releases {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases", project.GitOwner, project.GitProject)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		error_manager(err, 2)
+	}
+
+	req.Header.Add("Accept", "application/vnd.github+json")
+
+	// if len(*githubTokenPtr) > 0 {
+	// 	req.Header.Add("Authorization", "Bearer ")
+	// }
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		error_manager(err, 2)
+	}
+
+	defer res.Body.Close()
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		error_manager(err, 2)
+	}
+
+	var releases Releases
+	json.Unmarshal([]byte(body), &releases)
+
+	return releases
+}
+
+func get_releases(projects []Project, providers []Provider, githubTokenPtr string) Releases {
+
+	var desiredReleases Releases
 
 	for _, project := range projects {
 
@@ -124,25 +194,9 @@ func get_releases(projects []Project, providers []Provider) {
 		case "github":
 			fmt.Println("repo:", project.GitOwner, "/", project.GitProject)
 			fmt.Println(providers)
-			url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases", project.GitOwner, project.GitProject)
 
-			req, _ := http.NewRequest("GET", url, nil)
+			releases := get_releases_github(project, "https://api.github.com/repos/%s/%s/releases", githubTokenPtr)
 
-			req.Header.Add("Accept", "application/vnd.github+json")
-
-			// if config.Providers["github"] {
-			// 	req.Header.Add("Authorization", "Bearer ")
-			// }
-
-			res, _ := http.DefaultClient.Do(req)
-			defer res.Body.Close()
-			body, _ := ioutil.ReadAll(res.Body)
-
-			var releases Releases
-			json.Unmarshal([]byte(body), &releases)
-			// fmt.Println(len(releases))
-
-			var desiredReleases Releases
 			for _, release := range releases {
 				switch release.Prerelease {
 				case false:
@@ -157,13 +211,12 @@ func get_releases(projects []Project, providers []Provider) {
 				}
 			}
 
-			for _, desiredRelease := range desiredReleases {
-				fmt.Println(desiredRelease.TagName)
-			}
-		case "docker.io":
+			// case "docker.io":
 
 		}
 
 	}
+
+	return desiredReleases
 
 }
