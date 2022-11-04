@@ -98,30 +98,36 @@ func get_tags_dockerhub(project Dockerhub, providerurl string, providerToken str
 func get_releases(projects Projects, limitedprojects []string, providers []Provider, githubTokenPtr string) {
 
 	for _, project := range projects.Github {
+		is := "github"
+		for _, provider := range providers {
+			if provider.Name == is {
+				for _, limited := range limitedprojects {
+					if limited == project.Project || limited == "" {
+						fmt.Println("repo:", project.Owner, "/", project.Project)
+						fmt.Println(providers)
 
-		for _, limited := range limitedprojects {
-			if limited == project.Project || limited == "" {
-				fmt.Println("repo:", project.Owner, "/", project.Project)
-				fmt.Println(providers)
+						url := fmt.Sprint(provider.Url, "/repos/%s/%s/releases")
+						releases := get_tags_github(project, url, githubTokenPtr)
 
-				releases := get_tags_github(project, "https://api.github.com/repos/%s/%s/releases", githubTokenPtr)
+						for _, release := range releases {
+							switch release.Prerelease {
+							case false:
+								if strings.Contains(release.TagName, project.FilterMust) {
+									fmt.Println(release.TagName)
+								}
 
-				for _, release := range releases {
-					switch release.Prerelease {
-					case false:
-						if strings.Contains(release.TagName, project.FilterMust) {
-							fmt.Println(release.TagName)
+							case true && project.AllowPrerelease:
+								if strings.Contains(release.TagName, project.FilterMust) {
+									fmt.Println(release.TagName)
+								}
+							}
 						}
 
-					case true && project.AllowPrerelease:
-						if strings.Contains(release.TagName, project.FilterMust) {
-							fmt.Println(release.TagName)
-						}
 					}
 				}
-
 			}
 		}
+
 	}
 
 	for _, project := range projects.Dockerhub {

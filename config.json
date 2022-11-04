@@ -1,7 +1,8 @@
 {
     "providers": [
         {
-            "name": "github"
+            "name": "github",
+            "url": "https://api.github.com"
         }
     ],
     "projects": {
