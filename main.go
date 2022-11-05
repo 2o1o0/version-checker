@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/manifoldco/promptui"
 )
 
 func main() {
+	interactivePtr := flag.Bool("interactive", false, "Make results interactive with more details")
 	githubTokenPtr := flag.String("githubToken", "", "Github API token")
 	configPathPtr := flag.String("configpath", "./config.json", "Path to config file")
 	limitProjectsPtr := flag.String("limitprojects", "", "Comma array of projects names to filter at query (ie: redis,rancher")
@@ -20,6 +23,37 @@ func main() {
 	config := load_config(*configPathPtr)
 
 	releases := get_releases(config.Projects, strings.Split(*limitProjectsPtr, ","), config.Providers, *githubTokenPtr)
+
+	if *interactivePtr {
+
+		templates := &promptui.SelectTemplates{
+			Label:    "{{ . }}?",
+			Active:   "\U0001F336 {{ .Release_Element.Name | cyan }} ({{ .Release_Element.TagName | red }})",
+			Inactive: "  {{ .Release_Element.Name | cyan }} ({{ .Release_Element.TagName | red }})",
+			Selected: "\U0001F336 {{ .Release_Element.Name | red | cyan }}",
+			Details: `
+	--------- Release ----------
+	{{ "Name:" | faint }}	{{ .Release_Element.Name }}
+	{{ "URL:" | faint }}	{{ .Release_Element.URL }}
+	{{ "TagName:" | faint }}	{{ .Release_Element.TagName }}`,
+		}
+
+		prompt := promptui.Select{
+			Label:     "Select a Release",
+			Items:     releases.Github_Releases,
+			Templates: templates,
+		}
+
+		_, result, err := prompt.Run()
+
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
+
+		fmt.Printf("You choose %q\n", result)
+
+	}
 
 	os.Exit(0)
 }
@@ -132,25 +166,25 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 		is := "dockerhub"
 		for _, provider := range providers {
 			if provider.Name == is {
-		for _, limited := range limitedprojects {
-			if limited == project.Project || limited == "" {
-				fmt.Println("repo:", project.Project)
+				for _, limited := range limitedprojects {
+					if limited == project.Project || limited == "" {
+						fmt.Println("repo:", project.Project)
 						fmt.Println(provider)
 
 						url := fmt.Sprint(provider.Url, "/v2/repositories/library/%s/tags")
 						releases := get_tags_dockerhub(project, url, githubTokenPtr)
 
-				for _, release := range releases.Results {
+						for _, release := range releases.Results {
 
-					if strings.Contains(release.Name, project.FilterMust) {
-						fmt.Println(release.Name)
+							if strings.Contains(release.Name, project.FilterMust) {
+								fmt.Println(release.Name)
 								dockerhub_projects = append(dockerhub_projects, releases.Results...)
-					}
+							}
 
+						}
+					}
 				}
 			}
-		}
-	}
 		}
 	}
 
