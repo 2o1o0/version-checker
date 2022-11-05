@@ -12,6 +12,8 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
+var interactive_mode bool
+
 func main() {
 	interactivePtr := flag.Bool("interactive", false, "Make results interactive with more details")
 	githubTokenPtr := flag.String("githubToken", "", "Github API token")
@@ -20,28 +22,79 @@ func main() {
 
 	flag.Parse()
 
+	interactive_mode = *interactivePtr
+
 	config := load_config(*configPathPtr)
+
+	if interactive_mode {
+		fmt.Println("Loading projects...")
+
+	}
 
 	releases := get_releases(config.Projects, strings.Split(*limitProjectsPtr, ","), config.Providers, *githubTokenPtr)
 
-	if *interactivePtr {
+	if interactive_mode {
 
-		templates := &promptui.SelectTemplates{
-			Label:    "{{ . }}?",
-			Active:   "\U0001F336 {{ .Release_Element.Name | cyan }} ({{ .Release_Element.TagName | red }})",
-			Inactive: "  {{ .Release_Element.Name | cyan }} ({{ .Release_Element.TagName | red }})",
-			Selected: "\U0001F336 {{ .Release_Element.Name | red | cyan }}",
-			Details: `
-	--------- Release ----------
-	{{ "Name:" | faint }}	{{ .Release_Element.Name }}
-	{{ "URL:" | faint }}	{{ .Release_Element.URL }}
-	{{ "TagName:" | faint }}	{{ .Release_Element.TagName }}`,
+		prompt_provider := promptui.Select{
+			Size:     10,
+			Label:    "Select a Provider",
+			Items:    config.Providers,
+			HideHelp: true,
 		}
 
-		prompt := promptui.Select{
+		_, result_provider, err := prompt_provider.Run()
+
+		if err != nil {
+			fmt.Printf("Prompt failed %v\n", err)
+			return
+		}
+
+		var templates *promptui.SelectTemplates
+		var prompt promptui.Select
+
+		if strings.Contains(result_provider, "github") {
+			templates = &promptui.SelectTemplates{
+			Label:    "{{ . }}?",
+				Active:   "\u27A1\uFE0F {{ .Name | cyan }} ({{ .HTMLURL | red }})",
+				Inactive: "  {{ .Name | cyan }}",
+				Selected: "\u27A1\uFE0F {{ .Name | red | cyan }}",
+			Details: `
+	--------- Release ----------
+				{{ "Name:" | faint }}	{{ .Name }}
+				{{ "URL:" | faint }}	{{ .HTMLURL }}
+				{{ "TagName:" | faint }}	{{ .TagName }}
+				{{ "PreRelease:" | faint }}	{{ .Prerelease }}`,
+		}
+
+			prompt = promptui.Select{
+				Size:      10,
 			Label:     "Select a Release",
 			Items:     releases.Github_Releases,
 			Templates: templates,
+				HideHelp:  true,
+			}
+
+		} else if strings.Contains(result_provider, "dockerhub") {
+			templates = &promptui.SelectTemplates{
+				Label:    "{{ . }}?",
+				Active:   "\u27A1\uFE0F {{ .Name | cyan }}",
+				Inactive: "  {{ .Name | cyan }}",
+				Selected: "\u27A1\uFE0F {{ .Name | red | cyan }}",
+				Details: `
+				--------- Release ----------
+				{{ "Name:" | faint }}	{{ .Name }}`,
+			}
+
+			prompt = promptui.Select{
+				Size:      10,
+				Label:     "Select a Release",
+				Items:     releases.DockerHub_Tags,
+				Templates: templates,
+				HideHelp:  true,
+			}
+
+		} else {
+			error_manager(err, 3)
 		}
 
 		_, result, err := prompt.Run()
@@ -131,15 +184,17 @@ func get_tags_dockerhub(project Dockerhub, providerurl string, providerToken str
 
 func get_releases(projects Projects, limitedprojects []string, providers []Provider, githubTokenPtr string) Filtered_Projects {
 
-	var github_projects []Release_Element
+	github_projects := Github_Releases{}
 	for _, project := range projects.Github {
 		is := "github"
 		for _, provider := range providers {
 			if provider.Name == is {
 				for _, limited := range limitedprojects {
 					if limited == project.Project || limited == "" {
+						if !interactive_mode {
 						fmt.Println("repo:", project.Owner, "/", project.Project)
 						fmt.Println(provider)
+						}
 
 						url := fmt.Sprint(provider.Url, "/repos/%s/%s/releases")
 						releases := get_tags_github(project, url, githubTokenPtr)
@@ -147,8 +202,11 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 						for _, release := range releases {
 							if !release.Prerelease || (release.Prerelease && project.AllowPrerelease) {
 								if strings.Contains(release.TagName, project.FilterMust) {
+									if !interactive_mode {
 									fmt.Println(release.TagName)
-									github_projects = append(github_projects, releases...)
+									}
+									github_projects = append(github_projects, release)
+								}
 								}
 
 							}
@@ -159,26 +217,28 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 			}
 		}
 
-	}
-
-	var dockerhub_projects []Result
+	dockerhub_projects := DockerHub_Tags{}
 	for _, project := range projects.Dockerhub {
 		is := "dockerhub"
 		for _, provider := range providers {
 			if provider.Name == is {
 				for _, limited := range limitedprojects {
 					if limited == project.Project || limited == "" {
+						if !interactive_mode {
 						fmt.Println("repo:", project.Project)
 						fmt.Println(provider)
-
+						}
 						url := fmt.Sprint(provider.Url, "/v2/repositories/library/%s/tags")
 						releases := get_tags_dockerhub(project, url, githubTokenPtr)
 
 						for _, release := range releases.Results {
 
 							if strings.Contains(release.Name, project.FilterMust) {
+								if !interactive_mode {
 								fmt.Println(release.Name)
-								dockerhub_projects = append(dockerhub_projects, releases.Results...)
+
+								}
+								dockerhub_projects.Results = append(dockerhub_projects.Results, release)
 							}
 
 						}
@@ -190,7 +250,7 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 
 	filtered_projects := Filtered_Projects{
 		Github_Releases: github_projects,
-		DockerHub_Tags:  dockerhub_projects,
+		DockerHub_Tags:  dockerhub_projects.Results,
 	}
 	return filtered_projects
 }
