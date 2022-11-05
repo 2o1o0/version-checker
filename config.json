@@ -3,6 +3,10 @@
         {
             "name": "github",
             "url": "https://api.github.com"
+        },
+        {
+            "name": "dockerhub",
+            "url": "https://hub.docker.com"
         }
     ],
     "projects": {

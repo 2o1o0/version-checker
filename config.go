@@ -12,6 +12,7 @@ func create_config(path string) {
 		Providers: []Provider{
 			{
 				Name: "",
+				Url:  "",
 			},
 		},
 		Projects: Projects{

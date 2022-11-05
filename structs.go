@@ -29,6 +29,11 @@ type Provider struct {
 	Url  string `json:"url"`
 }
 
+type Filtered_Projects struct {
+	Github_Releases []Release_Element
+	DockerHub_Tags  []Result
+}
+
 // Github API
 
 type Github_Releases []Release_Element

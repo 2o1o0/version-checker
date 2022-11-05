@@ -19,7 +19,7 @@ func main() {
 
 	config := load_config(*configPathPtr)
 
-	get_releases(config.Projects, strings.Split(*limitProjectsPtr, ","), config.Providers, *githubTokenPtr)
+	releases := get_releases(config.Projects, strings.Split(*limitProjectsPtr, ","), config.Providers, *githubTokenPtr)
 
 	os.Exit(0)
 }
@@ -95,8 +95,9 @@ func get_tags_dockerhub(project Dockerhub, providerurl string, providerToken str
 	return releases
 }
 
-func get_releases(projects Projects, limitedprojects []string, providers []Provider, githubTokenPtr string) {
+func get_releases(projects Projects, limitedprojects []string, providers []Provider, githubTokenPtr string) Filtered_Projects {
 
+	var github_projects []Release_Element
 	for _, project := range projects.Github {
 		is := "github"
 		for _, provider := range providers {
@@ -104,22 +105,18 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 				for _, limited := range limitedprojects {
 					if limited == project.Project || limited == "" {
 						fmt.Println("repo:", project.Owner, "/", project.Project)
-						fmt.Println(providers)
+						fmt.Println(provider)
 
 						url := fmt.Sprint(provider.Url, "/repos/%s/%s/releases")
 						releases := get_tags_github(project, url, githubTokenPtr)
 
 						for _, release := range releases {
-							switch release.Prerelease {
-							case false:
+							if !release.Prerelease || (release.Prerelease && project.AllowPrerelease) {
 								if strings.Contains(release.TagName, project.FilterMust) {
 									fmt.Println(release.TagName)
+									github_projects = append(github_projects, releases...)
 								}
 
-							case true && project.AllowPrerelease:
-								if strings.Contains(release.TagName, project.FilterMust) {
-									fmt.Println(release.TagName)
-								}
 							}
 						}
 
@@ -130,23 +127,36 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 
 	}
 
+	var dockerhub_projects []Result
 	for _, project := range projects.Dockerhub {
-
+		is := "dockerhub"
+		for _, provider := range providers {
+			if provider.Name == is {
 		for _, limited := range limitedprojects {
 			if limited == project.Project || limited == "" {
 				fmt.Println("repo:", project.Project)
-				fmt.Println(providers)
+						fmt.Println(provider)
 
-				releases := get_tags_dockerhub(project, "https://hub.docker.com/v2/repositories/library/%s/tags", githubTokenPtr)
+						url := fmt.Sprint(provider.Url, "/v2/repositories/library/%s/tags")
+						releases := get_tags_dockerhub(project, url, githubTokenPtr)
 
 				for _, release := range releases.Results {
 
 					if strings.Contains(release.Name, project.FilterMust) {
 						fmt.Println(release.Name)
+								dockerhub_projects = append(dockerhub_projects, releases.Results...)
 					}
 
 				}
 			}
 		}
 	}
+		}
+	}
+
+	filtered_projects := Filtered_Projects{
+		Github_Releases: github_projects,
+		DockerHub_Tags:  dockerhub_projects,
+	}
+	return filtered_projects
 }
