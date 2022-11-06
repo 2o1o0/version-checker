@@ -4,15 +4,102 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
 
-	"github.com/manifoldco/promptui"
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 var interactive_mode bool
+
+const listHeight = 14
+
+var (
+	titleStyle        = lipgloss.NewStyle().MarginLeft(2)
+	itemStyle         = lipgloss.NewStyle().PaddingLeft(4)
+	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("170"))
+	paginationStyle   = list.DefaultStyles().PaginationStyle.PaddingLeft(4)
+	helpStyle         = list.DefaultStyles().HelpStyle.PaddingLeft(4).PaddingBottom(1)
+	quitTextStyle     = lipgloss.NewStyle().Margin(1, 0, 2, 4)
+)
+
+type item string
+
+func (i item) FilterValue() string { return "" }
+
+type itemDelegate struct{}
+
+func (d itemDelegate) Height() int                               { return 1 }
+func (d itemDelegate) Spacing() int                              { return 0 }
+func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
+func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	i, ok := listItem.(item)
+	if !ok {
+		return
+	}
+
+	str := fmt.Sprintf("%d. %s", index+1, i)
+
+	fn := itemStyle.Render
+	if index == m.Index() {
+		fn = func(s string) string {
+			return selectedItemStyle.Render("> " + s)
+		}
+	}
+
+	fmt.Fprint(w, fn(str))
+}
+
+type model struct {
+	list     list.Model
+	choice   string
+	quitting bool
+}
+
+func (m model) Init() tea.Cmd {
+	return nil
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.list.SetWidth(msg.Width)
+		return m, nil
+
+	case tea.KeyMsg:
+		switch keypress := msg.String(); keypress {
+		case "ctrl+c":
+			m.quitting = true
+			return m, tea.Quit
+
+		case "enter":
+			i, ok := m.list.SelectedItem().(item)
+			if ok {
+				m.choice = string(i)
+			}
+			return m, tea.Quit
+		}
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m model) View() string {
+	if m.choice != "" {
+		return quitTextStyle.Render(fmt.Sprintf("%s? Sounds good to me.", m.choice))
+	}
+	if m.quitting {
+		return quitTextStyle.Render("Not hungry? That’s cool.")
+	}
+	return "\n" + m.list.View()
+}
 
 func main() {
 	interactivePtr := flag.Bool("interactive", false, "Make results interactive with more details")
@@ -33,79 +120,23 @@ func main() {
 
 	releases := get_releases(config.Projects, strings.Split(*limitProjectsPtr, ","), config.Providers, *githubTokenPtr)
 
-	if interactive_mode {
+	const defaultWidth = 20
+	items := []list.Item{}
+	for _, release := range releases.Github_Releases {
+		items = append(items, item(release.TagName))
+	}
+	l := list.New(items, itemDelegate{}, defaultWidth, listHeight)
+	l.Title = "What do you want for dinner?"
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.Styles.Title = titleStyle
+	l.Styles.PaginationStyle = paginationStyle
+	l.Styles.HelpStyle = helpStyle
 
-		prompt_provider := promptui.Select{
-			Size:     10,
-			Label:    "Select a Provider",
-			Items:    config.Providers,
-			HideHelp: true,
-		}
-
-		_, result_provider, err := prompt_provider.Run()
-
-		if err != nil {
-			fmt.Printf("Prompt failed %v\n", err)
-			return
-		}
-
-		var templates *promptui.SelectTemplates
-		var prompt promptui.Select
-
-		if strings.Contains(result_provider, "github") {
-			templates = &promptui.SelectTemplates{
-			Label:    "{{ . }}?",
-				Active:   "\u27A1\uFE0F {{ .Name | cyan }} ({{ .HTMLURL | red }})",
-				Inactive: "  {{ .Name | cyan }}",
-				Selected: "\u27A1\uFE0F {{ .Name | red | cyan }}",
-			Details: `
-	--------- Release ----------
-				{{ "Name:" | faint }}	{{ .Name }}
-				{{ "URL:" | faint }}	{{ .HTMLURL }}
-				{{ "TagName:" | faint }}	{{ .TagName }}
-				{{ "PreRelease:" | faint }}	{{ .Prerelease }}`,
-		}
-
-			prompt = promptui.Select{
-				Size:      10,
-			Label:     "Select a Release",
-			Items:     releases.Github_Releases,
-			Templates: templates,
-				HideHelp:  true,
-			}
-
-		} else if strings.Contains(result_provider, "dockerhub") {
-			templates = &promptui.SelectTemplates{
-				Label:    "{{ . }}?",
-				Active:   "\u27A1\uFE0F {{ .Name | cyan }}",
-				Inactive: "  {{ .Name | cyan }}",
-				Selected: "\u27A1\uFE0F {{ .Name | red | cyan }}",
-				Details: `
-				--------- Release ----------
-				{{ "Name:" | faint }}	{{ .Name }}`,
-			}
-
-			prompt = promptui.Select{
-				Size:      10,
-				Label:     "Select a Release",
-				Items:     releases.DockerHub_Tags,
-				Templates: templates,
-				HideHelp:  true,
-			}
-
-		} else {
-			error_manager(err, 3)
-		}
-
-		_, result, err := prompt.Run()
-
-		if err != nil {
-			fmt.Printf("Prompt failed %v\n", err)
-			return
-		}
-
-		fmt.Printf("You choose %q\n", result)
-
+	m := model{list: l}
+	if _, err := tea.NewProgram(m).StartReturningModel(); err != nil {
+		fmt.Println("Error running program:", err)
+		os.Exit(1)
 	}
 
 	os.Exit(0)
@@ -135,9 +166,10 @@ func get_tags_github(project Github, githubUrl string, githubToken string) Githu
 
 	req.Header.Add("Accept", "application/vnd.github+json")
 
-	// if len(*githubTokenPtr) > 0 {
-	// 	req.Header.Add("Authorization", "Bearer ")
-	// }
+	if len(githubToken) > 0 {
+		bearer_token := fmt.Sprint("Bearer ", githubToken)
+		req.Header.Add("Authorization", bearer_token)
+	}
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -192,8 +224,8 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 				for _, limited := range limitedprojects {
 					if limited == project.Project || limited == "" {
 						if !interactive_mode {
-						fmt.Println("repo:", project.Owner, "/", project.Project)
-						fmt.Println(provider)
+							fmt.Println("repo:", project.Owner, "/", project.Project)
+							fmt.Println(provider)
 						}
 
 						url := fmt.Sprint(provider.Url, "/repos/%s/%s/releases")
@@ -203,19 +235,19 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 							if !release.Prerelease || (release.Prerelease && project.AllowPrerelease) {
 								if strings.Contains(release.TagName, project.FilterMust) {
 									if !interactive_mode {
-									fmt.Println(release.TagName)
+										fmt.Println(release.TagName)
 									}
 									github_projects = append(github_projects, release)
 								}
-								}
-
 							}
-						}
 
+						}
 					}
+
 				}
 			}
 		}
+	}
 
 	dockerhub_projects := DockerHub_Tags{}
 	for _, project := range projects.Dockerhub {
@@ -225,8 +257,8 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 				for _, limited := range limitedprojects {
 					if limited == project.Project || limited == "" {
 						if !interactive_mode {
-						fmt.Println("repo:", project.Project)
-						fmt.Println(provider)
+							fmt.Println("repo:", project.Project)
+							fmt.Println(provider)
 						}
 						url := fmt.Sprint(provider.Url, "/v2/repositories/library/%s/tags")
 						releases := get_tags_dockerhub(project, url, githubTokenPtr)
@@ -235,7 +267,7 @@ func get_releases(projects Projects, limitedprojects []string, providers []Provi
 
 							if strings.Contains(release.Name, project.FilterMust) {
 								if !interactive_mode {
-								fmt.Println(release.Name)
+									fmt.Println(release.Name)
 
 								}
 								dockerhub_projects.Results = append(dockerhub_projects.Results, release)
