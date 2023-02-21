@@ -1,4 +1,4 @@
-module vmo/release-checker
+module vmo/version-checker
 
 go 1.18
 
